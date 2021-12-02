@@ -1,4 +1,4 @@
-include!(concat!(env!("OUT_DIR"), "\\generated.rs"));
+include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
 mod library;
 
