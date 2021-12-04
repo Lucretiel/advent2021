@@ -95,8 +95,13 @@ impl<I: Iterator<Item = Result<T, E>>, T, E> Iterator for UseOksAdapter<'_, I, E
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let (_, max) = self.iter.size_hint();
-        (0, max)
+        match *self.error {
+            Err(_) => (0, Some(0)),
+            Ok(()) => {
+                let (_, max) = self.iter.size_hint();
+                (0, max)
+            }
+        }
     }
 }
 
