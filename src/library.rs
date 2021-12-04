@@ -1,5 +1,7 @@
 use std::mem;
 
+use num::Num;
+
 #[derive(Debug, Clone)]
 enum State<T, const N: usize> {
     Begin,
@@ -73,6 +75,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct UseOksAdapter<'a, I, E> {
     iter: I,
     error: &'a mut Result<(), E>,
@@ -82,16 +85,13 @@ impl<I: Iterator<Item = Result<T, E>>, T, E> Iterator for UseOksAdapter<'_, I, E
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match *self.error {
-            Err(_) => None,
-            Ok(()) => self
-                .iter
-                .next()?
-                .map_err(|err| {
-                    *self.error = Err(err);
-                })
-                .ok(),
-        }
+        self.error.as_ref().ok()?;
+        self.iter
+            .next()?
+            .map_err(|err| {
+                *self.error = Err(err);
+            })
+            .ok()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -141,5 +141,15 @@ mod iter_ext_tests {
             [2, 3, 4],
             [3, 4, 5],
         ]))
+    }
+}
+
+pub trait StrExt {
+    fn parse_radix<N: Num>(&self, radix: u32) -> Result<N, N::FromStrRadixErr>;
+}
+
+impl StrExt for str {
+    fn parse_radix<N: Num>(&self, radix: u32) -> Result<N, N::FromStrRadixErr> {
+        N::from_str_radix(self, radix)
     }
 }

@@ -1,7 +1,7 @@
-use std::num::ParseIntError;
-
 use anyhow::Context;
 use itertools::{self, Itertools};
+
+use crate::library::{IterExt, StrExt};
 
 #[derive(Default)]
 struct Counts {
@@ -66,58 +66,56 @@ pub fn part1(input: &str) -> anyhow::Result<u32> {
     Ok(gamma_rate * epsilon_rate)
 }
 
-/// bit_critera is a function taking (num_zeroes, num_ones, bit)
-fn identify_diagnostic_code<'a>(
-    mut signals: Vec<&'a str>,
-    bit_critera: impl Fn(usize, usize, bool) -> bool,
-) -> Option<&'a str> {
+/// bit_critera is a function taking (column_bit, bit)
+fn identify_diagnostic_code(
+    mut signals: Vec<&str>,
+    bit_criteria: impl Fn(bool, bool) -> bool,
+) -> Option<&str> {
     for i in 0.. {
-        if let Ok(signal) = signals.iter().exactly_one() {
+        if let Ok(&signal) = signals.iter().exactly_one() {
             return Some(signal);
         }
 
-        let signal_count = signals.len();
+        // Count the true bits in column `i`, but also return `None` if `i`
+        // is out of bounds for the column
         let ones_count = signals
             .iter()
             .map(|signal| signal.as_bytes().get(i))
-            .try_fold(0, |count, b| {
-                b.map(|&b| if b == b'1' { count + 1 } else { count })
-            })?;
-        let zeroes_count = signal_count - ones_count;
+            .map(|bit| bit.ok_or(()))
+            .use_oks(|column_bits| column_bits.filter(|&&b| b == b'1').count())
+            .ok()?;
 
-        signals
-            .retain(|signal| bit_critera(zeroes_count, ones_count, signal.as_bytes()[i] == b'1'));
+        let zeroes_count = signals.len() - ones_count;
+
+        signals.retain(|signal| {
+            bit_criteria(ones_count >= zeroes_count, signal.as_bytes()[i] == b'1')
+        });
     }
 
     None
 }
 
-trait StrExt {
-    fn parse_radix(&self, radix: u32) -> Result<usize, ParseIntError>;
+fn parse_diagnostic_code(
+    signals: Vec<&str>,
+    bit_critera: impl Fn(bool, bool) -> bool,
+) -> anyhow::Result<u32> {
+    identify_diagnostic_code(signals, bit_critera)
+        .context("no rating found")?
+        .parse_radix(2)
+        .context("failed to parse rating")
 }
 
-impl StrExt for str {
-    fn parse_radix(&self, radix: u32) -> Result<usize, ParseIntError> {
-        usize::from_str_radix(self, radix)
-    }
-}
-
-pub fn part2(input: &str) -> anyhow::Result<usize> {
-    // o2_copy & co2_copy
+pub fn part2(input: &str) -> anyhow::Result<u32> {
     let input = input.lines().collect_vec();
-    let o2_rating = identify_diagnostic_code(input.clone(), |zerocount, onecount, bit| {
-        (zerocount <= onecount) == bit
-    })
-    .context("no o2 rating found")?
-    .parse_radix(2)
-    .context("failed to parse o2 rating")?;
 
-    let co2_rating = identify_diagnostic_code(input.clone(), |zerocount, onecount, bit| {
-        (onecount < zerocount) == bit
+    let o2_rating: u32 = parse_diagnostic_code(input.clone(), |column_bit, signal_bit| {
+        column_bit == signal_bit
     })
-    .context("no co2 rating found")?
-    .parse_radix(2)
-    .context("failed to parse co2 rating")?;
+    .context("error getting o2 rating")?;
+
+    let co2_rating: u32 =
+        parse_diagnostic_code(input, |column_bit, signal_bit| column_bit != signal_bit)
+            .context("error getting co2 rating")?;
 
     eprintln!("o2: {}, co2: {}", o2_rating, co2_rating);
 
