@@ -66,14 +66,14 @@ pub fn part1(input: &str) -> anyhow::Result<u32> {
     Ok(gamma_rate * epsilon_rate)
 }
 
-/// bit_critera is a function taking (column_bit, bit)
+/// bit_criteria is a function taking (column_bit, bit)
 fn identify_diagnostic_code(
     mut signals: Vec<&str>,
     bit_criteria: impl Fn(bool, bool) -> bool,
 ) -> Option<&str> {
     for i in 0.. {
-        if let Ok(&signal) = signals.iter().exactly_one() {
-            return Some(signal);
+        if let Ok(signal) = signals.iter().at_most_one() {
+            return signal.copied();
         }
 
         // Count the true bits in column `i`, but also return `None` if `i`
@@ -97,9 +97,9 @@ fn identify_diagnostic_code(
 
 fn parse_diagnostic_code(
     signals: Vec<&str>,
-    bit_critera: impl Fn(bool, bool) -> bool,
+    bit_criteria: impl Fn(bool, bool) -> bool,
 ) -> anyhow::Result<u32> {
-    identify_diagnostic_code(signals, bit_critera)
+    identify_diagnostic_code(signals, bit_criteria)
         .context("no rating found")?
         .parse_radix(2)
         .context("failed to parse rating")

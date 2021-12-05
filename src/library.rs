@@ -1,8 +1,8 @@
-use std::mem;
+use std::{iter::FusedIterator, mem};
 
 use num::Num;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum State<T, const N: usize> {
     Begin,
     Buffered([T; N]),
@@ -15,16 +15,10 @@ impl<T, const N: usize> State<T, N> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Windows<I: Iterator, const N: usize> {
     iter: I,
     state: State<I::Item, N>,
-}
-
-impl<I: Iterator, const N: usize> Windows<I, N> {
-    fn compute_size_hint(inner_size: usize) -> usize {
-        inner_size.saturating_sub(N - 1)
-    }
 }
 
 impl<I: Iterator, const N: usize> Iterator for Windows<I, N>
@@ -42,7 +36,7 @@ where
 
         if let Some(next) = self.iter.next() {
             self.state = State::Buffered(brownstone::build_iter(
-                buffer.iter().skip(1).cloned().chain(Some(next)),
+                buffer[1..].iter().cloned().chain(Some(next)),
             ))
         }
 
@@ -50,28 +44,38 @@ where
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let (min, max) = self.iter.size_hint();
-        (
-            Self::compute_size_hint(min),
-            max.map(Self::compute_size_hint),
-        )
+        match self.state {
+            State::Begin => {
+                let (min, max) = self.iter.size_hint();
+                (
+                    min.saturating_sub(N - 1),
+                    max.map(|max| max.saturating_sub(N - 1)),
+                )
+            }
+            State::Buffered(_) => {
+                let (min, max) = self.iter.size_hint();
+                (
+                    min.saturating_add(1),
+                    max.and_then(|max| max.checked_add(1)),
+                )
+            }
+            State::Done => (0, Some(0)),
+        }
     }
 }
 
-impl<I: Iterator + Clone, const N: usize> Clone for Windows<I, N>
+impl<I: Iterator, const N: usize> FusedIterator for Windows<I, N> where I::Item: Clone {}
+
+impl<I: ExactSizeIterator, const N: usize> ExactSizeIterator for Windows<I, N>
 where
     I::Item: Clone,
 {
-    fn clone(&self) -> Self {
-        Self {
-            iter: self.iter.clone(),
-            state: self.state.clone(),
+    fn len(&self) -> usize {
+        match self.state {
+            State::Begin => self.iter.len().saturating_sub(N - 1),
+            State::Buffered(_) => self.iter.len() + 1,
+            State::Done => 0,
         }
-    }
-
-    fn clone_from(&mut self, source: &Self) {
-        self.iter.clone_from(&source.iter);
-        self.state.clone_from(&source.state);
     }
 }
 
@@ -103,6 +107,13 @@ impl<I: Iterator<Item = Result<T, E>>, T, E> Iterator for UseOksAdapter<'_, I, E
             }
         }
     }
+}
+
+impl<I, T, E> FusedIterator for UseOksAdapter<'_, I, E>
+where
+    I: Iterator<Item = Result<T, E>>,
+    I: FusedIterator,
+{
 }
 
 pub trait IterExt: Iterator + Sized {
@@ -146,6 +157,46 @@ mod iter_ext_tests {
             [2, 3, 4],
             [3, 4, 5],
         ]))
+    }
+
+    #[test]
+    fn test_streaming_size_hint() {
+        let mut windows = (0..6).streaming_windows();
+
+        assert_eq!(windows.size_hint(), (4, Some(4)));
+        assert_eq!(windows.next(), Some([0, 1, 2]));
+
+        assert_eq!(windows.size_hint(), (3, Some(3)));
+        assert_eq!(windows.next(), Some([1, 2, 3]));
+
+        assert_eq!(windows.size_hint(), (2, Some(2)));
+        assert_eq!(windows.next(), Some([2, 3, 4]));
+
+        assert_eq!(windows.size_hint(), (1, Some(1)));
+        assert_eq!(windows.next(), Some([3, 4, 5]));
+
+        assert_eq!(windows.size_hint(), (0, Some(0)));
+        assert_eq!(windows.next(), None);
+    }
+
+    #[test]
+    fn test_streaming_size_hint_inexact() {
+        let mut windows = (0..6).streaming_windows().filter(|_| true);
+
+        assert_eq!(windows.size_hint(), (0, Some(4)));
+        assert_eq!(windows.next(), Some([0, 1, 2]));
+
+        assert_eq!(windows.size_hint(), (0, Some(3)));
+        assert_eq!(windows.next(), Some([1, 2, 3]));
+
+        assert_eq!(windows.size_hint(), (0, Some(2)));
+        assert_eq!(windows.next(), Some([2, 3, 4]));
+
+        assert_eq!(windows.size_hint(), (0, Some(1)));
+        assert_eq!(windows.next(), Some([3, 4, 5]));
+
+        assert_eq!(windows.size_hint(), (0, Some(0)));
+        assert_eq!(windows.next(), None);
     }
 }
 

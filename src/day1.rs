@@ -16,10 +16,9 @@ pub fn part1(input: &str) -> anyhow::Result<usize> {
 pub fn part2(input: &str) -> anyhow::Result<usize> {
     input
         .split_whitespace()
-        .map(|token| token.parse())
+        .map(|token| token.parse::<u32>())
         .use_oks(|numbers| {
             numbers
-                .map(|a: u32| a)
                 .streaming_windows()
                 .map(|[a, b, c]| a + b + c)
                 .streaming_windows()
