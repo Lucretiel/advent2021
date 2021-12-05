@@ -58,10 +58,13 @@ pub fn part1(input: &str) -> anyhow::Result<u32> {
         .map(|b| if b { ('1', '0') } else { ('0', '1') })
         .unzip();
 
-    let gamma_rate =
-        u32::from_str_radix(&gamma_rate, 2).context("failed to parse binary number")?;
-    let epsilon_rate =
-        u32::from_str_radix(&epsilon_rate, 2).context("failed to parse binary number")?;
+    let gamma_rate: u32 = gamma_rate
+        .parse_radix(2)
+        .context("failed to parse binary number")?;
+
+    let epsilon_rate: u32 = epsilon_rate
+        .parse_radix(2)
+        .context("failed to parse binary number")?;
 
     Ok(gamma_rate * epsilon_rate)
 }
