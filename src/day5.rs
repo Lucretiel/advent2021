@@ -1,6 +1,7 @@
+use std::collections::HashMap;
+
 use anyhow::Context;
 use gridly::prelude::*;
-use gridly_grids::SparseGrid;
 use nom::{
     character::complete::{char, digit1, multispace0, multispace1, space0},
     IResult, Parser,
@@ -48,37 +49,24 @@ fn final_parse_all_lines(input: &str) -> Result<Vec<Line>, ErrorTree<final_parse
 fn solve(input: &str, filter: impl Fn(&Line) -> bool) -> anyhow::Result<usize> {
     let lines = final_parse_all_lines(input).context("failed to parse lines")?;
 
-    let outer_root = lines
+    let mut counts: HashMap<Location, usize> = HashMap::new();
+
+    lines
         .iter()
-        .flat_map(|line| [line.root, line.root + line.vec])
-        .fold(Location::zero(), |best, loc| Location {
-            row: best.row.max(loc.row),
-            column: best.column.max(loc.column),
-        });
+        .filter(|&line| filter(line))
+        .flat_map(|line| {
+            let unit = Vector {
+                rows: line.vec.rows.clamp(Rows(-1), Rows(1)),
+                columns: line.vec.columns.clamp(Columns(-1), Columns(1)),
+            };
 
-    let mut grid: SparseGrid<i32> =
-        SparseGrid::new(outer_root - Location::zero() + Rows(1) + Columns(1));
+            let magnitude = line.vec.rows.0.abs().max(line.vec.columns.0.abs()) + 1;
 
-    for line in lines.iter().filter(|&line| filter(line)) {
-        let unit = Vector {
-            rows: line.vec.rows.clamp(Rows(-1), Rows(1)),
-            columns: line.vec.columns.clamp(Columns(-1), Columns(1)),
-        };
+            (0..magnitude).map(move |i| line.root + (unit * i))
+        })
+        .for_each(|loc| *counts.entry(loc).or_default() += 1);
 
-        let magnitude = line.vec.rows.0.abs().max(line.vec.columns.0.abs()) + 1;
-
-        for i in 0..magnitude {
-            *grid
-                .get_mut(line.root + (unit * i))
-                .ok()
-                .context("out of bounds??")? += 1;
-        }
-    }
-
-    Ok(grid
-        .occupied_entries()
-        .filter(|&(_, &value)| value > 1)
-        .count())
+    Ok(counts.values().filter(|&&count| count > 1).count())
 }
 
 pub fn part1(input: &str) -> anyhow::Result<usize> {
