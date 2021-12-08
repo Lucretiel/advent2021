@@ -1,6 +1,7 @@
-use std::{iter::FusedIterator, mem};
+use std::{iter::FusedIterator, mem, str::FromStr};
 
 use num::Num;
+use thiserror::Error;
 
 #[derive(Debug, Clone, Copy)]
 enum State<T, const N: usize> {
@@ -208,4 +209,34 @@ impl StrExt for str {
     fn parse_radix<N: Num>(&self, radix: u32) -> Result<N, N::FromStrRadixErr> {
         N::from_str_radix(self, radix)
     }
+}
+
+#[derive(Debug, Clone, Error)]
+#[error("failed to parse token {token:?} at index {index}")]
+pub struct ParseListError<E> {
+    token: String,
+    index: usize,
+
+    #[source]
+    error: E,
+}
+
+pub fn parse_input_iter<'a, T, C>(
+    input: impl IntoIterator<Item = &'a str>,
+) -> Result<C, ParseListError<T::Err>>
+where
+    T: FromStr,
+    C: FromIterator<T>,
+{
+    input
+        .into_iter()
+        .enumerate()
+        .map(|(index, token)| {
+            token.parse().map_err(|error| ParseListError {
+                token: token.to_string(),
+                index,
+                error,
+            })
+        })
+        .collect()
 }
