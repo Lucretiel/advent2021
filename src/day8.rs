@@ -37,6 +37,13 @@ impl SegmentSet {
     fn count(&self) -> usize {
         self.segments.values().filter(|&b| *b).count()
     }
+
+    // What digit is this, if any?
+    fn identify(&self) -> Option<usize> {
+        get_digit_shapes()
+            .iter()
+            .position(|candidate| self == candidate)
+    }
 }
 
 fn parse_segment(input: &str) -> IResult<&str, Segment, ErrorTree<&str>> {
@@ -269,30 +276,29 @@ pub fn part1(input: &str) -> anyhow::Result<i32> {
 
 pub fn part2(input: &str) -> anyhow::Result<usize> {
     let display_data = parse_all_displays(input).context("parse error")?;
-    let digits = get_digit_shapes();
 
-    display_data
-        .iter()
-        .map(|display| {
-            DisplayWiring::compute(&display.signals)
-                .context("failed to compute display wiring")
-                .map(|wiring| (wiring, display.output_digits))
-        })
-        .map(|res| {
-            let (wiring, output_digits) = res?;
-            output_digits
-                .iter()
-                .rev()
-                .map(|&digit| wiring.get_digit(digit))
-                .zip(0..)
-                .map(|(digit, exp)| {
-                    digits
-                        .iter()
-                        .position(|&candidate| digit == candidate)
-                        .map(|digit| digit * 10usize.pow(exp))
-                        .context("no matching digit")
-                })
-                .sum::<anyhow::Result<usize>>()
-        })
-        .sum()
+    // I'd much rather have this be an iterator sum, but the control flow
+    // (dealing with Results) got pretty hairy
+    let mut total = 0;
+
+    for display_data in display_data {
+        // Perform the solve- figure out which input segments are associated
+        // with which output segments
+        let display_wiring = DisplayWiring::compute(&display_data.signals)
+            .context("failed to compute display wiring")?;
+
+        // iterate over the 4 output digits. Associate each one with an
+        // exponent so that the total sum can be accumulated
+        for (&digit, exp) in display_data.output_digits.iter().rev().zip(0..) {
+            // Run the input signal through the wiring to get the corrected
+            // segments
+            let digit = display_wiring.get_digit(digit);
+
+            // Figure out which digit is on the display
+            let digit = digit.identify().context("no matching digit")?;
+            total += digit * 10usize.pow(exp);
+        }
+    }
+
+    Ok(total)
 }
