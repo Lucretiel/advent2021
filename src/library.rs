@@ -1,4 +1,4 @@
-use std::{iter::FusedIterator, mem, str::FromStr};
+use std::{collections::HashMap, hash::Hash, iter::FusedIterator, mem, str::FromStr};
 
 use num::Num;
 use thiserror::Error;
@@ -239,4 +239,45 @@ where
             })
         })
         .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Counter<T: Eq + Hash> {
+    counts: HashMap<T, usize>,
+}
+
+impl<T: Eq + Hash> Counter<T> {
+    pub fn new() -> Self {
+        Self {
+            counts: HashMap::new(),
+        }
+    }
+
+    pub fn add(&mut self, value: T, count: usize) {
+        *self.counts.entry(value).or_insert(0) += count
+    }
+
+    pub fn add_one(&mut self, value: T) {
+        self.add(value, 1)
+    }
+
+    pub fn iter_counts(
+        &self,
+    ) -> impl Iterator<Item = (&T, usize)> + ExactSizeIterator + Clone + FusedIterator {
+        self.counts.iter().map(|(item, &count)| (item, count))
+    }
+}
+
+impl<T: Eq + Hash> Extend<T> for Counter<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        iter.into_iter().for_each(|item| self.add_one(item))
+    }
+}
+
+impl<T: Eq + Hash> FromIterator<T> for Counter<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut this = Self::new();
+        this.extend(iter);
+        this
+    }
 }
