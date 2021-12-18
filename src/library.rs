@@ -246,6 +246,14 @@ pub struct Counter<T: Eq + Hash> {
     counts: HashMap<T, usize>,
 }
 
+impl<T: Eq + Hash> Default for Counter<T> {
+    fn default() -> Self {
+        Self {
+            counts: Default::default(),
+        }
+    }
+}
+
 impl<T: Eq + Hash> Counter<T> {
     pub fn new() -> Self {
         Self {
@@ -253,8 +261,11 @@ impl<T: Eq + Hash> Counter<T> {
         }
     }
 
-    pub fn add(&mut self, value: T, count: usize) {
-        *self.counts.entry(value).or_insert(0) += count
+    pub fn add(&mut self, value: T, additional: usize) {
+        self.counts
+            .entry(value)
+            .and_modify(|value| *value += additional)
+            .or_insert(additional);
     }
 
     pub fn add_one(&mut self, value: T) {
@@ -263,7 +274,7 @@ impl<T: Eq + Hash> Counter<T> {
 
     pub fn iter_counts(
         &self,
-    ) -> impl Iterator<Item = (&T, usize)> + ExactSizeIterator + Clone + FusedIterator {
+    ) -> impl Iterator<Item = (&T, usize)> + Clone + FusedIterator + ExactSizeIterator {
         self.counts.iter().map(|(item, &count)| (item, count))
     }
 }
