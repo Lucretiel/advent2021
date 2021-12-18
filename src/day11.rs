@@ -36,16 +36,19 @@ impl OctopusGrid {
         );
 
         // Increment octopuses and resolve flashes
-        while let Some(increment_loc) = self.increment_buffer.pop() {
-            if let Ok(cell) = self.grid.get_mut(increment_loc) {
+        while let Some(location) = self.increment_buffer.pop() {
+            if let Ok(cell) = self.grid.get_mut(location) {
                 *cell += 1;
                 if *cell == 10 {
                     // Record a flash
-                    self.flash_buffer.insert(increment_loc);
+                    self.flash_buffer.insert(location);
 
                     // All adjacent octopuses will increment again
-                    self.increment_buffer
-                        .extend(TOUCHING_ADJACENCIES.iter().map(|&dir| increment_loc + dir))
+                    self.increment_buffer.extend(
+                        TOUCHING_ADJACENCIES
+                            .iter()
+                            .map(|&direction| location + direction),
+                    )
                 }
             }
         }
