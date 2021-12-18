@@ -67,7 +67,8 @@ impl Board {
                 }
             }
         }
-        return None;
+
+        None
     }
 }
 
@@ -87,7 +88,7 @@ fn parse_board(input: &str) -> IResult<&str, Board, ErrorTree<&str>> {
         .map(|row: [Cell; 5]| row)
         .context("row")
         .separated_array(line_ending)
-        .map(|rows| ArrayGrid::from_rows(rows))
+        .map(ArrayGrid::from_rows)
         .map(|grid| Board { grid, win: false })
         .parse(input)
 }

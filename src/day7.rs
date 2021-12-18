@@ -45,7 +45,7 @@ impl FormationFlank {
 }
 
 pub fn part1(input: &str) -> anyhow::Result<i32> {
-    let crabs: CrabList = parse_input_iter(input.split(",")).context("failed to parse input")?;
+    let crabs: CrabList = parse_input_iter(input.split(',')).context("failed to parse input")?;
 
     let mut fuel = 0;
 
@@ -154,7 +154,7 @@ impl FromIterator<i32> for CrabPopulation {
 
 pub fn part2(input: &str) -> anyhow::Result<i32> {
     let mut crabs: CrabPopulation =
-        parse_input_iter(input.split(",")).context("failed to parse input")?;
+        parse_input_iter(input.split(',')).context("failed to parse input")?;
 
     let mut fuel = 0;
 

@@ -18,7 +18,7 @@ impl FromIterator<i32> for FishCounter {
 
 pub fn solve(input: &str, days: i32) -> anyhow::Result<i64> {
     let mut counter: FishCounter = input
-        .split(",")
+        .split(',')
         .map(|day| day.parse().context("failed to parse day"))
         .try_collect()?;
 

@@ -173,7 +173,7 @@ pub fn part2(input: &str) -> anyhow::Result<i64> {
         })
         .collect_vec();
 
-    scores.sort();
+    scores.sort_unstable();
 
     Ok(scores[scores.len() / 2])
 }

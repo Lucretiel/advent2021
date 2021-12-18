@@ -125,7 +125,7 @@ impl DisplayWiring {
     fn compute(signals: &[SegmentSet; 10]) -> Option<Self> {
         let mut counts: EnumMap<Segment, u8> = EnumMap::default();
 
-        signals.into_iter().for_each(|signal| {
+        signals.iter().for_each(|signal| {
             signal
                 .segments
                 .iter()
