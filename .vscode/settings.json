@@ -1,8 +1,10 @@
 {
-    "cSpell.words": [
-        "gridly",
-        "Itertools",
-        "multispace",
-        "thiserror"
-    ]
+  "cSpell.words": [
+    "chems",
+    "gridly",
+    "Itertools",
+    "minmax",
+    "multispace",
+    "thiserror"
+  ]
 }
