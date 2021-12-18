@@ -1,59 +1,66 @@
-use std::iter;
+use std::{collections::HashSet, iter};
 
 use anyhow::Context;
-use gridly::prelude::{GridBounds, GridMut, Location, TOUCHING_ADJACENCIES};
+use gridly::prelude::{GridBounds, GridMut, GridSetter, Location, TOUCHING_ADJACENCIES};
 use gridly_grids::ArrayGrid;
 use itertools::Itertools;
 
 struct OctopusGrid {
     grid: ArrayGrid<i64, 10, 10>,
+
+    // Store the buffers used in `take_step` so that they can be reused over
+    // several steps
+    increment_buffer: Vec<Location>,
+    flash_buffer: HashSet<Location>,
 }
 
 impl OctopusGrid {
-    fn take_step(&mut self) -> i64 {
-        let mut flashes: Vec<Location> = Vec::new();
-        // increment
-        for row in self.grid.row_range() {
-            for column in self.grid.column_range() {
-                let cell = self.grid.get_mut((row, column)).unwrap();
+    fn from_rows(rows: [[i64; 10]; 10]) -> Self {
+        Self {
+            grid: ArrayGrid::from_rows(rows),
+            increment_buffer: Vec::with_capacity(100),
+            flash_buffer: HashSet::new(),
+        }
+    }
+
+    fn take_step(&mut self) -> usize {
+        // Clear buffers
+        self.increment_buffer.clear();
+        self.flash_buffer.clear();
+
+        // Initial state: all octopuses will increment
+        self.increment_buffer.extend(
+            self.grid
+                .row_range()
+                .flat_map(|row| self.grid.column_range().map(move |column| row + column)),
+        );
+
+        // Increment octopuses and resolve flashes
+        while let Some(increment_loc) = self.increment_buffer.pop() {
+            if let Ok(cell) = self.grid.get_mut(increment_loc) {
                 *cell += 1;
                 if *cell == 10 {
-                    flashes.push(row + column);
+                    // Record a flash
+                    self.flash_buffer.insert(increment_loc);
+
+                    // All adjacent octopuses will increment again
+                    self.increment_buffer
+                        .extend(TOUCHING_ADJACENCIES.iter().map(|&dir| increment_loc + dir))
                 }
             }
         }
 
-        let mut count = 0;
-        while let Some(flash_loc) = flashes.pop() {
-            count += 1;
+        // Reset flashes
+        self.flash_buffer
+            .iter()
+            .for_each(|&flash_loc| self.grid.set(flash_loc, 0).expect("out of bounds flash"));
 
-            for direction in TOUCHING_ADJACENCIES {
-                let neighbor_loc = flash_loc + direction;
-                if let Ok(neighbor) = self.grid.get_mut(neighbor_loc) {
-                    *neighbor += 1;
-                    if *neighbor == 10 {
-                        flashes.push(neighbor_loc);
-                    }
-                }
-            }
-        }
-
-        // reset values > 9 to 0
-        for row in self.grid.row_range() {
-            for column in self.grid.column_range() {
-                let cell = self.grid.get_mut(row + column).unwrap();
-                if *cell > 9 {
-                    *cell = 0;
-                }
-            }
-        }
-
-        count
+        self.flash_buffer.len()
     }
 }
 
 fn parse_grid(input: &str) -> anyhow::Result<OctopusGrid> {
-    let rows = brownstone::try_build_iter(
+    brownstone::try_build_iter(
         input
             .lines()
             .map(|line| {
@@ -65,14 +72,11 @@ fn parse_grid(input: &str) -> anyhow::Result<OctopusGrid> {
             })
             .while_some(),
     )
-    .context("failed to build grid")?;
-
-    Ok(OctopusGrid {
-        grid: ArrayGrid::from_rows(rows),
-    })
+    .context("failed to build grid")
+    .map(OctopusGrid::from_rows)
 }
 
-pub fn part1(input: &str) -> anyhow::Result<i64> {
+pub fn part1(input: &str) -> anyhow::Result<usize> {
     let mut grid = parse_grid(input)?;
 
     Ok((0..100).map(move |_| grid.take_step()).sum())
