@@ -6,6 +6,7 @@
     "Itertools",
     "minmax",
     "multispace",
-    "thiserror"
+    "thiserror",
+    "uninit"
   ]
 }

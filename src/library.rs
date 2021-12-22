@@ -1,6 +1,17 @@
-use std::{collections::HashMap, hash::Hash, iter::FusedIterator, mem, str::FromStr};
+use std::{
+    cell::UnsafeCell,
+    cmp,
+    collections::{hash_map, HashMap},
+    hash::Hash,
+    iter::FusedIterator,
+    mem, ops,
+    str::FromStr,
+    sync::atomic::{self, AtomicBool},
+};
 
+use enum_map::MaybeUninit;
 use num::Num;
+use rayon::prelude::*;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy)]
@@ -80,6 +91,45 @@ where
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Chunks<I, const N: usize> {
+    iter: I,
+}
+
+impl<I: Iterator, const N: usize> Iterator for Chunks<I, N> {
+    type Item = [I::Item; N];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        brownstone::try_build_iter(&mut self.iter)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (min, max) = self.iter.size_hint();
+
+        (
+            min.checked_div(N).unwrap_or(usize::MAX),
+            max.and_then(|max| max.checked_div(N)),
+        )
+    }
+}
+
+impl<I: FusedIterator, const N: usize> FusedIterator for Chunks<I, N> {}
+
+impl<I: DoubleEndedIterator + ExactSizeIterator, const N: usize> DoubleEndedIterator
+    for Chunks<I, N>
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        while self.iter.len() % N != 0 {
+            let _ = self.iter.next_back();
+        }
+
+        brownstone::try_build_iter(self.iter.by_ref().rev()).map(|mut item| {
+            item.reverse();
+            item
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct UseOksAdapter<'a, I, E> {
     iter: I,
@@ -126,6 +176,10 @@ pub trait IterExt: Iterator + Sized {
             iter: self,
             state: State::Begin,
         }
+    }
+
+    fn streaming_chunks<const N: usize>(self) -> Chunks<Self, N> {
+        Chunks { iter: self }
     }
 
     fn use_oks<T, U, E, F>(self, body: F) -> Result<U, E>
@@ -262,10 +316,12 @@ impl<T: Eq + Hash> Counter<T> {
     }
 
     pub fn add(&mut self, value: T, additional: usize) {
-        self.counts
-            .entry(value)
-            .and_modify(|value| *value += additional)
-            .or_insert(additional);
+        if additional > 0 {
+            self.counts
+                .entry(value)
+                .and_modify(|value| *value += additional)
+                .or_insert(additional);
+        }
     }
 
     pub fn add_one(&mut self, value: T) {
@@ -277,18 +333,167 @@ impl<T: Eq + Hash> Counter<T> {
     ) -> impl Iterator<Item = (&T, usize)> + Clone + FusedIterator + ExactSizeIterator {
         self.counts.iter().map(|(item, &count)| (item, count))
     }
+
+    pub fn merge(self, other: Self) -> Self {
+        let (mut receiver, sender) = match self.counts.len().cmp(&other.counts.len()) {
+            cmp::Ordering::Less => (other, self),
+            cmp::Ordering::Equal => match self.counts.capacity() >= other.counts.capacity() {
+                true => (self, other),
+                false => (other, self),
+            },
+            cmp::Ordering::Greater => (self, other),
+        };
+
+        receiver.extend(sender);
+        receiver
+    }
+}
+
+impl<T: Eq + Hash + Sync> Counter<T> {
+    pub fn par_iter_counts(&self) -> impl ParallelIterator<Item = (&T, usize)> {
+        self.counts.par_iter().map(|(item, &count)| (item, count))
+    }
 }
 
 impl<T: Eq + Hash> Extend<T> for Counter<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        iter.into_iter().for_each(|item| self.add_one(item))
+        self.extend(iter.into_iter().map(|item| (item, 1)))
     }
 }
 
-impl<T: Eq + Hash> FromIterator<T> for Counter<T> {
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+impl<T: Eq + Hash> Extend<(T, usize)> for Counter<T> {
+    fn extend<I: IntoIterator<Item = (T, usize)>>(&mut self, iter: I) {
+        iter.into_iter()
+            .for_each(|(item, count)| self.add(item, count))
+    }
+}
+
+impl<T: Eq + Hash> ops::Add<Self> for Counter<T> {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        self.merge(rhs)
+    }
+}
+
+impl<T: Eq + Hash> ops::AddAssign<Self> for Counter<T> {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = mem::take(self).merge(rhs);
+    }
+}
+
+impl<T: Eq + Hash + Send> ParallelExtend<T> for Counter<T> {
+    fn par_extend<I>(&mut self, par_iter: I)
+    where
+        I: rayon::iter::IntoParallelIterator<Item = T>,
+    {
+        self.par_extend(par_iter.into_par_iter().map(|item| (item, 1)))
+    }
+}
+
+impl<T: Eq + Hash + Send> ParallelExtend<(T, usize)> for Counter<T> {
+    fn par_extend<I>(&mut self, par_iter: I)
+    where
+        I: rayon::iter::IntoParallelIterator<Item = (T, usize)>,
+    {
+        let this = AtomicCell::new(mem::take(self));
+
+        *self = par_iter
+            .into_par_iter()
+            .fold(
+                || this.take().unwrap_or_default(),
+                |mut counter, (item, count)| {
+                    counter.add(item, count);
+                    counter
+                },
+            )
+            .reduce(Counter::new, Counter::merge)
+    }
+}
+
+impl<T: Eq + Hash + Send> FromParallelIterator<T> for Counter<T> {
+    fn from_par_iter<I>(par_iter: I) -> Self
+    where
+        I: IntoParallelIterator<Item = T>,
+    {
+        par_iter.into_par_iter().map(|item| (item, 1)).collect()
+    }
+}
+
+impl<T: Eq + Hash + Send> FromParallelIterator<(T, usize)> for Counter<T> {
+    fn from_par_iter<I>(par_iter: I) -> Self
+    where
+        I: IntoParallelIterator<Item = (T, usize)>,
+    {
+        par_iter
+            .into_par_iter()
+            .fold(Counter::new, |mut counter, (item, count)| {
+                counter.add(item, count);
+                counter
+            })
+            .reduce(Counter::new, Counter::merge)
+    }
+}
+
+impl<T: Eq + Hash, U> FromIterator<U> for Counter<T>
+where
+    Self: Extend<U>,
+{
+    fn from_iter<I: IntoIterator<Item = U>>(iter: I) -> Self {
         let mut this = Self::new();
         this.extend(iter);
         this
     }
 }
+
+impl<T: Eq + Hash> IntoIterator for Counter<T> {
+    type Item = (T, usize);
+
+    type IntoIter = hash_map::IntoIter<T, usize>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.counts.into_iter()
+    }
+}
+
+struct AtomicCell<T> {
+    inhabited: AtomicBool,
+    value: UnsafeCell<MaybeUninit<T>>,
+}
+
+impl<T> AtomicCell<T> {
+    fn empty() -> Self {
+        Self {
+            inhabited: AtomicBool::new(false),
+            value: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    fn new(value: T) -> Self {
+        Self {
+            inhabited: AtomicBool::new(true),
+            value: UnsafeCell::new(MaybeUninit::new(value)),
+        }
+    }
+
+    fn take(&self) -> Option<T> {
+        match self.inhabited.swap(false, atomic::Ordering::Relaxed) {
+            false => None,
+            true => Some(unsafe { self.value.get().as_ref().unwrap().as_ptr().read() }),
+        }
+    }
+}
+
+impl<T> Default for AtomicCell<T> {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl<T> From<T> for AtomicCell<T> {
+    fn from(value: T) -> Self {
+        Self::new(value)
+    }
+}
+
+unsafe impl<T: Send> Sync for AtomicCell<T> {}
