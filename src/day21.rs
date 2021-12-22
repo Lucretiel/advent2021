@@ -215,8 +215,8 @@ impl Multiverse {
         ];
 
         // Iterator of ((Game, count), (winning player, count))
-        let game_events = dice.par_iter().flat_map(|&total_roll| {
-            self.states.par_iter_counts().map(move |(game, count)| {
+        let game_events = dice.iter().flat_map(|&total_roll| {
+            self.states.iter_counts().map(move |(game, count)| {
                 let mut game = *game;
 
                 if let Some(Win) = game.do_move(self.next_to_play, total_roll, 21) {
